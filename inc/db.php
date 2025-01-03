@@ -3,6 +3,8 @@
 $servername = "localhost";
 $password = "zUBUqJEq0X@";
 // $username = "root";
+// $password = "";
+
 // $dbname = "addadmin";
 $dbname = "u516533008_application";
 
