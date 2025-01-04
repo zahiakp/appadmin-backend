@@ -11,7 +11,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 $input = json_decode(file_get_contents('php://input'), true);
 if (isset($_GET['api']) && $_GET['api'] == API) {
     if ($method == "GET") {
-        if (isset($_GET["progrmas"])) {
+        if (isset($_GET["programs"])) {
             $programs = $_GET["programs"];
             $sql = "SELECT * FROM schedule WHERE program IN ($programs)";
             $result = mysqli_query($conn, $sql);
