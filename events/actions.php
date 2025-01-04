@@ -33,7 +33,6 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
         } else {
             $sql = "SELECT * FROM events";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param("i", $id);
             $stmt->execute();
             $result = $stmt->get_result();
             $stmt->close();
