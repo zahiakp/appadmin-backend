@@ -104,7 +104,7 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
             $stmt->close();
             $merchantId = $merchant == "vr" ? 2 : 1;
             $stmt = $conn->prepare('UPDATE shops SET points = points + ? WHERE id = ?');
-            $stmt->bind_param('ii', $points, $student);
+            $stmt->bind_param('ii', $points, $merchantId);
             $stmt->execute();
             $stmt->close();
 
