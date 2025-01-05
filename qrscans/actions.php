@@ -32,7 +32,7 @@ function getStudentPoints($conn, $student_id)
 function isAlreadyScanned($conn, $event, $student)
 {
     $stmt = $conn->prepare('SELECT 1 FROM qr_scans WHERE event = ? AND student = ?');
-    $stmt->bind_param('ii', $event, $student);
+    $stmt->bind_param('is', $event, $student);
     $stmt->execute();
     $result = $stmt->get_result();
     $stmt->close();
