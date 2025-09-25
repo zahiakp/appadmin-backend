@@ -10,11 +10,11 @@ $method = $_SERVER['REQUEST_METHOD'];
 function handleOption($value)
 {
     $pointsMap = [
-        "expert" => 14,
-        "edu" => 14,
-        "write" => 10,
-        "pro" => 6,
-        "tranquil" => 10,
+      "Expert Convos" => 14,
+        "Edu Login" => 14,
+        "WriteWell Clinic" => 10,
+        "Pro Chat" => 6,
+        "Tranquil Wellness Hub" => 10,
     ];
     return $pointsMap[$value] ?? 0;
 }
@@ -49,6 +49,16 @@ function getEventType($conn, $id)
     return $result->num_rows > 0 ? $result->fetch_assoc()['type'] : null;
 }
 
+// NEW: Validate QR timestamp
+function isValidTimestamp($timestamp) {
+    $current_time = time();
+    $qr_time = intval($timestamp);
+    $time_diff = $current_time - $qr_time;
+    
+    // QR expires after 10 seconds (give 5 extra seconds for network delays)
+    return $time_diff >= 0 && $time_diff <= 10;
+}
+
 // Main Logic
 if (isset($_GET['api']) && $_GET['api'] == API) {
     if ($method == "GET" && isset($_GET['ID'])) {
@@ -66,9 +76,13 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
         // Handle POST request
         $event = $_GET['event'] ?? null;
         $student = $_GET['student'] ?? null;
+        $timestamp = $_GET['t'] ?? null; // NEW: Get timestamp
 
-        if (!$event || !$student) {
+        if (!$event || !$student || !$timestamp) {
             $response = ["success" => false, "message" => "Missing required fields"];
+        } elseif (!isValidTimestamp($timestamp)) {
+            // NEW: Check if QR is expired
+            $response = ["success" => false, "message" => "QR Code Expired - Please scan the live QR"];
         } elseif (isAlreadyScanned($conn, $event, $student)) {
             $response = ["success" => false, "message" => "Already Redeemed"];
         } else {
@@ -109,3 +123,4 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
 }
 
 echo json_encode($response);
+?>
