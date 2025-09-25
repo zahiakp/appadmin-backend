@@ -1,10 +1,9 @@
 <?php
 
 $servername = "localhost";
-$password = "zUBUqJEq0X@";
-$username = "root";
-$password = "";
-$dbname = "addadmin";
+$password = "&k?XO;WgA7";
+$username = "u999765516_application";
+$dbname = "u999765516_application";
 
 // $dbname = "u516533008_application";
 
