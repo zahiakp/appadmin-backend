@@ -55,8 +55,8 @@ function isValidTimestamp($timestamp) {
     $qr_time = intval($timestamp);
     $time_diff = $current_time - $qr_time;
     
-    // QR expires after 10 seconds (give 5 extra seconds for network delays)
-    return $time_diff >= 0 && $time_diff <= 10;
+    // Allow 2 minutes for QR scanning
+    return $time_diff >= 0 && $time_diff <= 120;
 }
 
 // Main Logic
