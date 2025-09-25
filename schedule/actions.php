@@ -1,191 +1,324 @@
 <?php
-
 include '../inc/head.php';
 include '../inc/const.php';
 include '../inc/db.php';
 
-
-
 $response = ["success" => false, "message" => "Invalid Request"];
 $method = $_SERVER['REQUEST_METHOD'];
 $input = json_decode(file_get_contents('php://input'), true);
+
 if (isset($_GET['api']) && $_GET['api'] == API) {
     if ($method == "GET") {
-        if (isset($_GET["programs"])) {
-            $programs = $_GET["programs"];
-            $sql = "SELECT * FROM schedule WHERE program IN ($programs)";
-            $result = mysqli_query($conn, $sql);
+        if (isset($_GET['stage']) || isset($_GET['all_stages'])) {
             $data = [];
-            if (mysqli_num_rows($result) > 0) {
-                while ($row = mysqli_fetch_assoc($result)) {
-                    $data[] = ["program" => $row['program'], "stage" => $row['stage']];
-                }
-                $response = [
-                    "success" => true,
-                    "data" => $data,
-                ];
-            }
-        } elseif (isset($_GET['stage'])) {
-            $stmt = null;
-            $data = [];
-            $stage = intval($_GET['stage']); // Sanitize stage input
 
-            if (isset($_GET['date'])) {
-                $date = $_GET['date']; // Assume proper validation or sanitization is done elsewhere
-                $sql = "SELECT S.*, B.name, B.category 
-                        FROM schedule S 
-                        JOIN programs B ON S.program = B.id 
-                        WHERE S.stage = ? AND S.date = ? ORDER BY S.start";
-                $stmt = $conn->prepare($sql);
-                $stmt->bind_param("is", $stage, $date);
+            if (isset($_GET['all_stages']) && $_GET['all_stages'] == 'true') {
+                // Fetch all stages for a specific date (for cross-stage validation)
+                if (isset($_GET['date'])) {
+                    $date = $_GET['date'];
+                    $sql = "SELECT * FROM schedule WHERE date = ? ORDER BY stage, start";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param("s", $date);
+                } else {
+                    $sql = "SELECT * FROM schedule ORDER BY stage, start";
+                    $stmt = $conn->prepare($sql);
+                }
             } else {
-                $sql = "SELECT S.*, B.name, B.category 
-                        FROM schedule S 
-                        JOIN branch B ON S.program = B.id 
-                        WHERE S.stage = ?  ORDER BY S.start";
-                $stmt = $conn->prepare($sql);
-                $stmt->bind_param("i", $stage);
+                // Fetch specific stage data
+                $stage = intval($_GET['stage']);
+                
+                if (isset($_GET['date'])) {
+                    $date = $_GET['date'];
+                    $sql = "SELECT * FROM schedule WHERE stage = ? AND date = ? ORDER BY start";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param("is", $stage, $date);
+                } else {
+                    $sql = "SELECT * FROM schedule WHERE stage = ? ORDER BY start";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param("i", $stage);
+                }
             }
 
             if ($stmt && $stmt->execute()) {
                 $result = $stmt->get_result();
-                if ($result->num_rows > 0) {
-                    while ($row = $result->fetch_assoc()) {
-                        $data[] = $row;
-                    }
-                    http_response_code(200);
-                    $response = [
-                        "success" => true,
-                        "data" => $data,
-                    ];
-                } else {
-                    http_response_code(404); // Not Found
-                    $response = [
-                        "success" => false,
-                        "message" => "No records found.",
-                    ];
+                while ($row = $result->fetch_assoc()) {
+                    $data[] = $row;
                 }
+                $response = ["success" => true, "data" => $data];
             } else {
-                http_response_code(500); // Internal Server Error
-                $response = [
-                    "success" => false,
-                    "message" => "Error executing query.",
-                    "error" => $conn->error,
-                ];
+                $response = ["success" => false, "message" => "Error executing query"];
             }
         } else {
-            http_response_code(400); // Bad Request
-            $response = [
-                "success" => false,
-                "message" => "Missing required 'stage' parameter.",
-            ];
+            $response = ["success" => false, "message" => "Missing required 'stage' parameter or 'all_stages' flag."];
         }
 
     } elseif ($method == "POST") {
-        $required_fields = ['stage', 'data'];
-        $missing_fields = [];
-        foreach ($required_fields as $field) {
-            if (!isset($input[$field])) {
-                $missing_fields[] = $field;
-            }
-        }
-
-        // Return error if any required fields are missing
-        if (!empty($missing_fields)) {
+        if (!isset($input['stage']) || !isset($input['data'])) {
             http_response_code(400);
             echo json_encode([
                 "success" => false,
-                "message" => "Missing required fields: " . implode(', ', $missing_fields),
+                "message" => "Missing required fields: stage or data"
             ]);
             exit();
         }
-        $stage = $input['stage'];
 
-        $data = json_decode($input['data'], true);
-        foreach ($data as $schedule) {
-            $program = $schedule['program'];
-            $date = $schedule['date'];
-            $start = $schedule['start'];
-            $end = $schedule['end'];
-            $sql = "UPDATE schedule SET  stage = ?, date = ?, start = ?, end = ? WHERE program = ?";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param("isssi", $stage, $date, $start, $end, $program);
-            $stmt->execute();
+        $stage = intval($input['stage']);
+        $data = $input['data'];
+        
+        // Enhanced validation with cross-stage checking
+        $conflicts = [];
+        $valid_items = [];
+        
+        // Get unique dates from the input data for cross-stage validation
+        $dates = array_unique(array_filter(array_column($data, 'date')));
+        $existing_programs_by_date = [];
+        
+        // Pre-fetch ALL existing programs (for date and cross-stage validation)
+        $all_existing_programs = [];
+        $all_programs_sql = "SELECT program_name, stage, date FROM schedule";
+        $all_programs_stmt = $conn->prepare($all_programs_sql);
+        
+        if ($all_programs_stmt->execute()) {
+            $all_programs_result = $all_programs_stmt->get_result();
+            while ($row = $all_programs_result->fetch_assoc()) {
+                $all_existing_programs[] = [
+                    'program_name' => $row['program_name'],
+                    'stage' => $row['stage'],
+                    'date' => $row['date']
+                ];
+            }
         }
-
-        http_response_code(201);
-        $response = array(
-            "success" => true,
-            "message" => "Scedule added succesfully",
-
-        );
-
-
-
-    } else if ($method == "PUT") {
-        if (!isset($_GET['id']) || !isset($input['title']) || !isset($input['body']) || !isset($input['image']) || !isset($input['url']) || !isset($input['tags']) || !isset($input['status']) || !isset($input['type'])) {
+        
+        // Also organize by date for efficient lookup
+        $existing_programs_by_date = [];
+        foreach ($all_existing_programs as $program) {
+            if (!isset($existing_programs_by_date[$program['date']])) {
+                $existing_programs_by_date[$program['date']] = [];
+            }
+            $existing_programs_by_date[$program['date']][] = [
+                'program_name' => $program['program_name'],
+                'stage' => $program['stage']
+            ];
+        }
+        
+        foreach ($data as $index => $schedule) {
+            // Skip completely empty rows
+            if (empty(trim($schedule['program_name'] ?? '')) && 
+                empty(trim($schedule['category'] ?? '')) && 
+                empty(trim($schedule['date'] ?? '')) && 
+                empty(trim($schedule['start'] ?? '')) && 
+                empty(trim($schedule['end'] ?? ''))) {
+                continue;
+            }
+            
+            $program_name = trim($schedule['program_name'] ?? '');
+            $category = trim($schedule['category'] ?? '');
+            $date = $schedule['date'] ?? '';
+            $start = $schedule['start'] ?? '';
+            $end = $schedule['end'] ?? '';
+            
+            // Validate required fields for non-empty rows
+            if (empty($program_name) || empty($category) || empty($date) || empty($start) || empty($end)) {
+                $conflicts[] = "Row " . ($index + 1) . ": All fields are required (Program: '{$program_name}', Category: '{$category}')";
+                continue;
+            }
+            
+            // Validate date format
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                $conflicts[] = "Row " . ($index + 1) . ": Invalid date format for '{$program_name}'. Expected YYYY-MM-DD";
+                continue;
+            }
+            
+            // Validate time format
+            if (!preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start) || !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $end)) {
+                $conflicts[] = "Row " . ($index + 1) . ": Invalid time format for '{$program_name}'";
+                continue;
+            }
+            
+            // Validate time logic (start < end)
+            if ($start >= $end) {
+                $conflicts[] = "Row " . ($index + 1) . ": Start time must be before end time for '{$program_name}'";
+                continue;
+            }
+            
+            // NEW: Check if program already exists on ANY date (block duplicate programs entirely)
+            $existing_program_check = array_filter($all_existing_programs, function($existing) use ($program_name, $stage, $date) {
+                // Exclude current stage and date combination (allow updating current selection)
+                return $existing['program_name'] === $program_name && 
+                       !($existing['stage'] == $stage && $existing['date'] === $date);
+            });
+            
+            if (!empty($existing_program_check)) {
+                $existing = $existing_program_check[0]; // Get first match
+                $conflicts[] = "Row " . ($index + 1) . ": Program '{$program_name}' is already scheduled on {$existing['date']} Stage {$existing['stage']}. Each program can only be scheduled once across all dates and stages.";
+                continue;
+            }
+            
+            // Check for cross-stage conflicts on the same date (additional validation)
+            if (isset($existing_programs_by_date[$date])) {
+                foreach ($existing_programs_by_date[$date] as $existing) {
+                    if ($existing['program_name'] === $program_name && $existing['stage'] != $stage) {
+                        $conflicts[] = "Row " . ($index + 1) . ": Program '{$program_name}' is already scheduled on Stage {$existing['stage']} for {$date}. A program cannot be scheduled on multiple stages on the same date.";
+                        continue 2; // Skip to next schedule item
+                    }
+                }
+            }
+            
+            // Check for duplicates within the current submission (any date)
+            $duplicates_in_submission = array_filter($valid_items, function($item) use ($program_name) {
+                return $item['program_name'] === $program_name;
+            });
+            
+            if (!empty($duplicates_in_submission)) {
+                $conflicts[] = "Row " . ($index + 1) . ": Program '{$program_name}' appears multiple times in current submission. Each program can only be scheduled once.";
+                continue;
+            }
+            
+            // Add to valid items
+            $valid_items[] = [
+                'program_name' => $program_name,
+                'category' => $category,
+                'stage' => $stage,
+                'date' => $date,
+                'start' => $start,
+                'end' => $end
+            ];
+        }
+        
+        // If there are validation errors, return them
+        if (!empty($conflicts)) {
             http_response_code(400);
-            $response = array("success" => false, "message" => "Missing required fields");
-            echo json_encode($response);
+            echo json_encode([
+                "success" => false,
+                "message" => "Validation errors detected",
+                "conflicts" => $conflicts
+            ]);
             exit();
         }
-        $id = mysqli_real_escape_string($conn, $_GET['id']);
-        $result = mysqli_query($conn, "SELECT * FROM news WHERE id = '$id'");
-        $data = mysqli_fetch_assoc($result);
-        if ($data) {
-            $title = mysqli_real_escape_string($conn, $input['title']);
-            $body = mysqli_real_escape_string($conn, $input['body']);
-            $image = mysqli_real_escape_string($conn, $input['image']);
-            $type = mysqli_real_escape_string($conn, $input['type']);
-            $url = mysqli_real_escape_string($conn, $input['url']);
-            $tags = mysqli_real_escape_string($conn, $input['tags']);
-            $status = mysqli_real_escape_string($conn, $input['status']);
-            $sql = "UPDATE news SET title = '$title', body = '$body', image = '$image',category = '$type',url = '$url',tags='$tags',status='$status' WHERE id = '$id'";
-
-            $resp = mysqli_query($conn, $sql);
-            if ($resp) {
-                http_response_code(200);
-                $response = array("success" => true, "message" => "News updated successfully");
-            } else {
-                http_response_code(500);
-                $response = array("success" => false, "message" => "Error updating News", "error" => mysqli_error($conn));
-            }
-        } else {
-            http_response_code(404);
-            $response = array("success" => false, "message" => "News not found");
-        }
-    } else if ($method == "DELETE") {
-        if (!isset($_GET['id'])) {
-            http_response_code(400);
-            $response = array("success" => false, "message" => "Id missing");
-            echo json_encode($response);
+        
+        // If no valid items to process
+        if (empty($valid_items)) {
+            echo json_encode([
+                "success" => true,
+                "message" => "No valid items to process",
+                "items_processed" => 0
+            ]);
             exit();
         }
-        $id = mysqli_real_escape_string($conn, $_GET['id']);
-        $result = mysqli_query($conn, "SELECT * FROM news WHERE id = '$id'");
-        $data = mysqli_fetch_assoc($result);
-        if ($data) {
-            $sql = "DELETE FROM news WHERE id = '$id'";
-            $resp = mysqli_query($conn, $sql);
-            if ($resp) {
-                http_response_code(200);
-                $response = array("success" => true, "message" => "News deleted successfully");
-            } else {
-                http_response_code(500);
-                $response = array("success" => false, "message" => "Error deleting News", "error" => mysqli_error($conn));
+        
+        // Start transaction
+        $conn->begin_transaction();
+        
+        try {
+            // FIXED: Clear existing schedule for this stage AND the specific dates being updated
+            // Get all dates that are being updated
+            $dates_to_clear = array_unique(array_column($valid_items, 'date'));
+            
+            foreach ($dates_to_clear as $date_to_clear) {
+                $clear_sql = "DELETE FROM schedule WHERE stage = ? AND date = ?";
+                $clear_stmt = $conn->prepare($clear_sql);
+                
+                if (!$clear_stmt) {
+                    throw new Exception("Failed to prepare clear statement: " . $conn->error);
+                }
+                
+                $clear_stmt->bind_param("is", $stage, $date_to_clear);
+                
+                if (!$clear_stmt->execute()) {
+                    throw new Exception("Failed to clear existing schedule for stage {$stage} on {$date_to_clear}: " . $clear_stmt->error);
+                }
+                $clear_stmt->close();
             }
-        } else {
-            http_response_code(404);
-            $response = array("success" => false, "message" => "News not found");
+            
+            // Final validation: Check if program exists anywhere else in the database
+            $final_conflicts = [];
+            foreach ($valid_items as $item) {
+                $check_sql = "SELECT stage, date FROM schedule WHERE program_name = ? AND NOT (stage = ? AND date = ?)";
+                $check_stmt = $conn->prepare($check_sql);
+                $check_stmt->bind_param("sis", $item['program_name'], $stage, $item['date']);
+                
+                if ($check_stmt->execute()) {
+                    $check_result = $check_stmt->get_result();
+                    if ($check_result->num_rows > 0) {
+                        $conflict_row = $check_result->fetch_assoc();
+                        $final_conflicts[] = "Program '{$item['program_name']}' is already scheduled on {$conflict_row['date']} Stage {$conflict_row['stage']}. Each program can only be scheduled once.";
+                    }
+                }
+                $check_stmt->close();
+            }
+            
+            if (!empty($final_conflicts)) {
+                $conn->rollback();
+                http_response_code(400);
+                echo json_encode([
+                    "success" => false,
+                    "message" => "Cross-stage conflicts detected",
+                    "conflicts" => $final_conflicts
+                ]);
+                exit();
+            }
+            
+            // Insert new schedule items
+            $insert_sql = "INSERT INTO schedule (program_name, category, stage, date, start, end) VALUES (?, ?, ?, ?, ?, ?)";
+            $insert_stmt = $conn->prepare($insert_sql);
+            
+            if (!$insert_stmt) {
+                throw new Exception("Failed to prepare insert statement: " . $conn->error);
+            }
+            
+            $successful_inserts = 0;
+            
+            foreach ($valid_items as $item) {
+                $insert_stmt->bind_param("ssisss", 
+                    $item['program_name'], 
+                    $item['category'], 
+                    $item['stage'], 
+                    $item['date'], 
+                    $item['start'], 
+                    $item['end']
+                );
+                
+                if ($insert_stmt->execute()) {
+                    $successful_inserts++;
+                } else {
+                    error_log("Failed to insert item: " . $insert_stmt->error . " - Data: " . json_encode($item));
+                }
+            }
+            
+            $insert_stmt->close();
+            
+            if ($successful_inserts > 0) {
+                $conn->commit();
+                http_response_code(201);
+                $response = [
+                    "success" => true, 
+                    "message" => "Schedule synced successfully with unique program validation",
+                    "items_processed" => $successful_inserts,
+                    "total_items" => count($valid_items),
+                    "dates_updated" => $dates_to_clear
+                ];
+            } else {
+                $conn->rollback();
+                throw new Exception("No items were successfully inserted");
+            }
+            
+        } catch (Exception $e) {
+            $conn->rollback();
+            http_response_code(500);
+            $response = [
+                "success" => false, 
+                "message" => "Database error: " . $e->getMessage()
+            ];
         }
+        
     } else {
         http_response_code(405);
-        $response = array("success" => false, "message" => "Invalid Method");
+        $response = ["success" => false, "message" => "Invalid Method"];
     }
 } else {
     http_response_code(401);
-    $response = array("success" => false, "message" => "Unauthorized Access", "server" => $_SERVER);
+    $response = ["success" => false, "message" => "Unauthorized Access"];
 }
 
-
 echo json_encode($response);
+?>
