@@ -29,7 +29,7 @@ function getMerchantPoints($conn, $id)
     return $result->num_rows > 0 ? $result->fetch_assoc()['points'] : null;
 }
 
-function isBalance($conn, $student, $points, )
+function isBalance($conn, $student, $points )
 {
     $stmt = $conn->prepare('SELECT points FROM glocal_points WHERE student = ?');
     $stmt->bind_param('s', $student);
