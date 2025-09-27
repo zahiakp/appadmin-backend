@@ -8,7 +8,7 @@ $method   = $_SERVER['REQUEST_METHOD'];
 
 if (isset($_GET['api']) && $_GET['api'] == API) {
 
-    /* ================= READ ================= */
+ 
     if ($method == "GET") {
 
         if (isset($_GET['id'])) {
@@ -46,13 +46,12 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
         }
     }
 
-    /* ================= CREATE / UPDATE ================= */
     elseif ($method == "POST") {
 
-        // 🔹 check if front-end wants to fake PUT
+    
         if (isset($_POST['_method']) && strtoupper($_POST['_method']) === 'PUT') {
 
-            // -------- UPDATE --------
+       
             if (!isset($_GET['id'])) {
                 http_response_code(400);
                 $response = ["success" => false, "message" => "Missing event ID"];
@@ -71,7 +70,6 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
                     }
                 }
 
-                // optional image upload
                 if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
                     $allowed = ['image/jpeg','image/jpg','image/png','image/gif','image/webp'];
                     $mime    = mime_content_type($_FILES['image']['tmp_name']);
@@ -110,7 +108,7 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
             }
 
         } else {
-            // -------- CREATE --------
+           
             $required = ['title','place','time','type'];
             $missing = [];
             foreach ($required as $f) {
@@ -150,7 +148,7 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
         }
     }
 
-    /* ================= DELETE ================= */
+
     elseif ($method == "DELETE") {
         if (!isset($_GET['id'])) {
             http_response_code(400);
