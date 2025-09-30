@@ -1,13 +1,13 @@
 <?php
 
 $servername = "localhost";
-// $password = "&k?XO;WgA7";
-// $username = "u999765516_application";
-// $dbname = "u999765516_application";
+$password = "&k?XO;WgA7";
+$username = "u999765516_application";
+$dbname = "u999765516_application";
 
-$username   = "root";  
-$password   = "";      
-$dbname     = "addadmin"; 
+// $username   = "root";  
+// $password   = "";      
+// $dbname     = "addadmin"; 
 
 // $dbname = "u516533008_application";
 
