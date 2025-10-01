@@ -4,6 +4,11 @@ include '../inc/head.php';
 include '../inc/const.php';
 include '../inc/db.php';
 
+// Enable error logging
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
 $response = ["success" => false, "message" => "Invalid Request"];
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -26,8 +31,9 @@ function getStudentPoints($conn, $student_id)
         $stmt->bind_param('s', $student_id);
         $stmt->execute();
         $result = $stmt->get_result();
+        $data = $result->num_rows > 0 ? $result->fetch_assoc()['points'] : null;
         $stmt->close();
-        return $result->num_rows > 0 ? $result->fetch_assoc()['points'] : null;
+        return $data;
     } catch (Exception $e) {
         error_log("Error in getStudentPoints: " . $e->getMessage());
         return null;
@@ -60,8 +66,9 @@ function getEventType($conn, $id)
         $stmt->bind_param('i', $id);
         $stmt->execute();
         $result = $stmt->get_result();
+        $data = $result->num_rows > 0 ? $result->fetch_assoc()['type'] : null;
         $stmt->close();
-        return $result->num_rows > 0 ? $result->fetch_assoc()['type'] : null;
+        return $data;
     } catch (Exception $e) {
         error_log("Error in getEventType: " . $e->getMessage());
         return null;
@@ -75,20 +82,21 @@ function validateEvent($conn, $event_id)
         $stmt->bind_param('i', $event_id);
         $stmt->execute();
         $result = $stmt->get_result();
+        $isValid = $result->num_rows > 0;
         $stmt->close();
-        return $result->num_rows > 0;
+        return $isValid;
     } catch (Exception $e) {
         error_log("Error in validateEvent: " . $e->getMessage());
         return false;
     }
 }
 
-function checkScanFrequency($conn, $student_id, $event_id, $min_interval = 3)
+function checkScanFrequency($conn, $student_id, $event_id, $min_interval = 5)
 {
     try {
-        // Check last scan for THIS SPECIFIC EVENT only
-        $stmt = $conn->prepare('SELECT MAX(scan_time) as last_scan FROM qr_scans WHERE student = ? AND event = ?');
-        $stmt->bind_param('si', $student_id, $event_id);
+        // Check last scan for ANY event (prevent rapid scanning across different events)
+        $stmt = $conn->prepare('SELECT MAX(scan_time) as last_scan FROM qr_scans WHERE student = ?');
+        $stmt->bind_param('s', $student_id);
         $stmt->execute();
         $result = $stmt->get_result();
         
@@ -102,7 +110,7 @@ function checkScanFrequency($conn, $student_id, $event_id, $min_interval = 3)
                 $time_diff = $current_time - $last_scan_time;
                 
                 if ($time_diff < $min_interval) {
-                    error_log("Scan frequency violation - Student: $student_id, Event: $event_id, Time diff: $time_diff seconds");
+                    error_log("Scan frequency violation - Student: $student_id, Time since last scan: $time_diff seconds (minimum: $min_interval)");
                     return false;
                 }
             }
@@ -142,101 +150,104 @@ try {
         // Admin scans student Jamia ID at event
         elseif ($method == "GET" && isset($_GET['event']) && isset($_GET['student'])) {
             $event = filter_var($_GET['event'], FILTER_VALIDATE_INT);
-            $student = strtoupper(trim($_GET['student'])); // Jamia ID like 2019JM062
+            $student = strtoupper(trim($_GET['student'])); // Jamia ID like 2019JMC062
 
-            // Validate Jamia ID format (basic validation)
-            if (!preg_match('/^\d{4}[A-Z]{2}\d{3,4}$/', $student)) {
+            error_log("QR Scan Request - Event: $event, Student: $student");
+
+            // Validate Jamia ID format (4 digits + 3 letters + 3-4 digits)
+            if (!preg_match('/^\d{4}[A-Z]{2,3}\d{3,4}$/', $student)) {
                 http_response_code(400);
-                $response = ["success" => false, "message" => "Invalid Jamia ID format. Expected format: 2019JM062"];
+                $response = ["success" => false, "message" => "Invalid Jamia ID format. Expected format: 2019ABC123"];
             } elseif ($event === false || $event <= 0) {
                 http_response_code(400);
                 $response = ["success" => false, "message" => "Invalid event ID"];
-            } elseif (!checkScanFrequency($conn, $student, $event, 3)) {
+            } 
+            // Validate event exists FIRST
+            elseif (!validateEvent($conn, $event)) {
+                http_response_code(404);
+                $response = ["success" => false, "message" => "Event not found"];
+            }
+            // Check if already scanned
+            elseif (isAlreadyScanned($conn, $event, $student)) {
+                http_response_code(409);
+                $response = ["success" => false, "message" => "Student has already been scanned for this event"];
+            }
+            // Check scan frequency (5 second cooldown)
+            elseif (!checkScanFrequency($conn, $student, $event, 5)) {
                 http_response_code(429);
-                $response = ["success" => false, "message" => "This student was just scanned for this event. Please wait a moment."];
+                $response = ["success" => false, "message" => "Please wait a moment before scanning again"];
             } else {
-                error_log("Admin scanning - Event: $event, Student Jamia ID: $student");
-                
-                // Check if student already scanned for this event
-                if (isAlreadyScanned($conn, $event, $student)) {
-                    http_response_code(409);
-                    $response = ["success" => false, "message" => "Student has already been scanned for this event"];
+                // Get event type
+                $eventType = getEventType($conn, $event);
+                if (!$eventType) {
+                    http_response_code(404);
+                    $response = ["success" => false, "message" => "Event type not found"];
                 } else {
-                    // Validate event exists
-                    if (!validateEvent($conn, $event)) {
-                        http_response_code(404);
-                        $response = ["success" => false, "message" => "Event not found"];
+                    $points = handleOption($eventType);
+                    if ($points <= 0) {
+                        http_response_code(400);
+                        $response = ["success" => false, "message" => "Invalid event type for points calculation: " . $eventType];
                     } else {
-                        $eventType = getEventType($conn, $event);
-                        if (!$eventType) {
-                            http_response_code(404);
-                            $response = ["success" => false, "message" => "Event type not found"];
-                        } else {
-                            $points = handleOption($eventType);
-                            if ($points <= 0) {
-                                http_response_code(400);
-                                $response = ["success" => false, "message" => "Invalid event type for points calculation"];
+                        // Begin transaction
+                        $conn->begin_transaction();
+                        
+                        try {
+                            // Double-check within transaction to prevent race conditions
+                            if (isAlreadyScanned($conn, $event, $student)) {
+                                $conn->rollback();
+                                http_response_code(409);
+                                $response = ["success" => false, "message" => "Student has already been scanned for this event"];
                             } else {
-                                // Begin transaction
-                                $conn->begin_transaction();
-                                
-                                try {
-                                    // Double-check within transaction
-                                    if (isAlreadyScanned($conn, $event, $student)) {
-                                        $conn->rollback();
-                                        http_response_code(409);
-                                        $response = ["success" => false, "message" => "Student has already been scanned for this event"];
-                                    } else {
-                                        $currentPoints = getStudentPoints($conn, $student);
+                                $currentPoints = getStudentPoints($conn, $student);
 
-                                        // Update student points
-                                        if ($currentPoints === null) {
-                                            $stmt = $conn->prepare('INSERT INTO glocal_points(student, points) VALUES(?, ?)');
-                                            $stmt->bind_param('si', $student, $points);
-                                            if (!$stmt->execute()) {
-                                                throw new Exception("Failed to create student points record");
-                                            }
-                                            $stmt->close();
-                                        } else {
-                                            $stmt = $conn->prepare('UPDATE glocal_points SET points = points + ? WHERE student = ?');
-                                            $stmt->bind_param('is', $points, $student);
-                                            if (!$stmt->execute()) {
-                                                throw new Exception("Failed to update student points");
-                                            }
-                                            $stmt->close();
-                                        }
-
-                                        // Record the scan
-                                        $stmt = $conn->prepare('INSERT INTO qr_scans(event, student, points, scan_time, ip_address) VALUES(?, ?, ?, NOW(), ?)');
-                                        $ip_address = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-                                        $stmt->bind_param('isis', $event, $student, $points, $ip_address);
-                                        
-                                        if (!$stmt->execute()) {
-                                            throw new Exception("Failed to record attendance scan");
-                                        }
-                                        $stmt->close();
-                                        
-                                        // Commit transaction
-                                        $conn->commit();
-                                        
-                                        http_response_code(201);
-                                        $response = [
-                                            "success" => true,
-                                            "message" => "Attendance recorded successfully",
-                                            "points" => $points,
-                                            "event_type" => $eventType,
-                                            "event_id" => $event,
-                                            "student_id" => $student
-                                        ];
-                                        
-                                        error_log("Successful attendance scan - Event: $event, Student: $student, Points: $points");
+                                // Update student points
+                                if ($currentPoints === null) {
+                                    // Create new student record
+                                    $stmt = $conn->prepare('INSERT INTO glocal_points(student, points) VALUES(?, ?)');
+                                    $stmt->bind_param('si', $student, $points);
+                                    if (!$stmt->execute()) {
+                                        throw new Exception("Failed to create student points record: " . $stmt->error);
                                     }
-                                } catch (Exception $e) {
-                                    $conn->rollback();
-                                    error_log("Transaction failed: " . $e->getMessage());
-                                    throw $e;
+                                    $stmt->close();
+                                } else {
+                                    // Update existing points
+                                    $stmt = $conn->prepare('UPDATE glocal_points SET points = points + ? WHERE student = ?');
+                                    $stmt->bind_param('is', $points, $student);
+                                    if (!$stmt->execute()) {
+                                        throw new Exception("Failed to update student points: " . $stmt->error);
+                                    }
+                                    $stmt->close();
                                 }
+
+                                // Record the scan
+                                $stmt = $conn->prepare('INSERT INTO qr_scans(event, student, points, scan_time, ip_address) VALUES(?, ?, ?, NOW(), ?)');
+                                $ip_address = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                                $stmt->bind_param('isis', $event, $student, $points, $ip_address);
+                                
+                                if (!$stmt->execute()) {
+                                    throw new Exception("Failed to record attendance scan: " . $stmt->error);
+                                }
+                                $stmt->close();
+                                
+                                // Commit transaction
+                                $conn->commit();
+                                
+                                http_response_code(201);
+                                $response = [
+                                    "success" => true,
+                                    "message" => "Attendance recorded successfully",
+                                    "points" => $points,
+                                    "event_type" => $eventType,
+                                    "event_id" => $event,
+                                    "student_id" => $student
+                                ];
+                                
+                                error_log("Successful attendance scan - Event: $event, Student: $student, Points: $points");
                             }
+                        } catch (Exception $e) {
+                            $conn->rollback();
+                            error_log("Transaction failed: " . $e->getMessage());
+                            throw $e;
                         }
                     }
                 }
