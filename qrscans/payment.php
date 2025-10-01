@@ -50,15 +50,13 @@ function isBalance($conn, $student, $points)
 
 function getMerchantId($merchant)
 {
-    // Normalize merchant name (lowercase, trim)
     $merchant = strtolower(trim($merchant));
     
-    // Map merchant names to IDs based on shops table
     $merchantMap = [
-        "cafe" => 1,     // MG Cafe
-        "vr" => 2,       // VR Hub
-        "papyrus" => 5,  // papyrus
-        "tajammul" => 6  // Alternative spelling
+        "cafe" => 1,     
+        "vr" => 2,       
+        "papyrus" => 5, 
+        "tajammul" => 6 
     ];
     
     error_log("getMerchantId - Input: '$merchant', Mapped ID: " . ($merchantMap[$merchant] ?? 'null'));

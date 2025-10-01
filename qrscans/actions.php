@@ -4,7 +4,6 @@ include '../inc/head.php';
 include '../inc/const.php';
 include '../inc/db.php';
 
-// Enable error logging
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
@@ -192,7 +191,6 @@ try {
                         $conn->begin_transaction();
                         
                         try {
-                            // Double-check within transaction to prevent race conditions
                             if (isAlreadyScanned($conn, $event, $student)) {
                                 $conn->rollback();
                                 http_response_code(409);
