@@ -9,7 +9,36 @@ $input = json_decode(file_get_contents('php://input'), true);
 
 if (isset($_GET['api']) && $_GET['api'] == API) {
     if ($method == "GET") {
-        if (isset($_GET['stage']) || isset($_GET['all_stages'])) {
+        // New endpoint: Get by program name and category
+        if (isset($_GET['program_name']) && isset($_GET['category'])) {
+            $program_name = trim($_GET['program_name']);
+            $category = trim($_GET['category']);
+            $data = [];
+            
+            // Optional date filter
+            if (isset($_GET['date'])) {
+                $date = $_GET['date'];
+                $sql = "SELECT * FROM schedule WHERE program_name = ? AND category = ? AND date = ? ORDER BY date, start";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("sss", $program_name, $category, $date);
+            } else {
+                $sql = "SELECT * FROM schedule WHERE program_name = ? AND category = ? ORDER BY date, start";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("ss", $program_name, $category);
+            }
+            
+            if ($stmt && $stmt->execute()) {
+                $result = $stmt->get_result();
+                while ($row = $result->fetch_assoc()) {
+                    $data[] = $row;
+                }
+                $response = ["success" => true, "data" => $data, "count" => count($data)];
+            } else {
+                $response = ["success" => false, "message" => "Error executing query"];
+            }
+        }
+        // Existing endpoint: Get by stage
+        elseif (isset($_GET['stage']) || isset($_GET['all_stages'])) {
             $data = [];
 
             if (isset($_GET['all_stages']) && $_GET['all_stages'] == 'true') {
@@ -47,7 +76,7 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
                 $response = ["success" => false, "message" => "Error executing query"];
             }
         } else {
-            $response = ["success" => false, "message" => "Missing required 'stage' parameter or 'all_stages' flag."];
+            $response = ["success" => false, "message" => "Missing required parameters. Provide either 'stage'/'all_stages' OR 'program_name' with 'category'."];
         }
 
     } elseif ($method == "DELETE") {
