@@ -14,11 +14,12 @@ $method = $_SERVER['REQUEST_METHOD'];
 function handleOption($value)
 {
     $pointsMap = [
-        "Expert Convos" => 14,
-        "Edu Login" => 14,
-        "WriteWell Clinic" => 10,
-        "Pro Chat" => 6,
-        "Tranquil Wellness Hub" => 10,
+        "Expert Convos" => 7,
+        "Edu Login" => 7,
+        "WriteWell Clinic" => 5,
+        "Pro Chat" => 3,
+        "Mind Wellness Cliinic" => 5,
+        "Science Orbit" => 7,
     ];
     return $pointsMap[$value] ?? 0;
 }
@@ -48,9 +49,9 @@ function isAlreadyScanned($conn, $event, $student)
         $result = $stmt->get_result();
         $hasRow = $result->num_rows > 0;
         $stmt->close();
-        
+
         error_log("Checking duplicate scan - Event: $event, Student: $student, Already scanned: " . ($hasRow ? 'YES' : 'NO'));
-        
+
         return $hasRow;
     } catch (Exception $e) {
         error_log("Error in isAlreadyScanned: " . $e->getMessage());
@@ -98,16 +99,16 @@ function checkScanFrequency($conn, $student_id, $event_id, $min_interval = 5)
         $stmt->bind_param('s', $student_id);
         $stmt->execute();
         $result = $stmt->get_result();
-        
+
         if ($result->num_rows > 0) {
             $row = $result->fetch_assoc();
             $stmt->close();
-            
+
             if ($row['last_scan']) {
                 $last_scan_time = strtotime($row['last_scan']);
                 $current_time = time();
                 $time_diff = $current_time - $last_scan_time;
-                
+
                 if ($time_diff < $min_interval) {
                     error_log("Scan frequency violation - Student: $student_id, Time since last scan: $time_diff seconds (minimum: $min_interval)");
                     return false;
@@ -116,7 +117,7 @@ function checkScanFrequency($conn, $student_id, $event_id, $min_interval = 5)
         } else {
             $stmt->close();
         }
-        
+
         return true;
     } catch (Exception $e) {
         error_log("Error in checkScanFrequency: " . $e->getMessage());
@@ -160,7 +161,7 @@ try {
             } elseif ($event === false || $event <= 0) {
                 http_response_code(400);
                 $response = ["success" => false, "message" => "Invalid event ID"];
-            } 
+            }
             // Validate event exists FIRST
             elseif (!validateEvent($conn, $event)) {
                 http_response_code(404);
@@ -189,7 +190,7 @@ try {
                     } else {
                         // Begin transaction
                         $conn->begin_transaction();
-                        
+
                         try {
                             if (isAlreadyScanned($conn, $event, $student)) {
                                 $conn->rollback();
@@ -221,15 +222,15 @@ try {
                                 $stmt = $conn->prepare('INSERT INTO qr_scans(event, student, points, scan_time, ip_address) VALUES(?, ?, ?, NOW(), ?)');
                                 $ip_address = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
                                 $stmt->bind_param('isis', $event, $student, $points, $ip_address);
-                                
+
                                 if (!$stmt->execute()) {
                                     throw new Exception("Failed to record attendance scan: " . $stmt->error);
                                 }
                                 $stmt->close();
-                                
+
                                 // Commit transaction
                                 $conn->commit();
-                                
+
                                 http_response_code(201);
                                 $response = [
                                     "success" => true,
@@ -239,7 +240,7 @@ try {
                                     "event_id" => $event,
                                     "student_id" => $student
                                 ];
-                                
+
                                 error_log("Successful attendance scan - Event: $event, Student: $student, Points: $points");
                             }
                         } catch (Exception $e) {
