@@ -135,23 +135,7 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
         $conflicts = [];
         $valid_items = [];
         
-        // Fetch all existing programs with category
-        $all_existing_programs = [];
-        $all_programs_sql = "SELECT program_name, category, stage, date FROM schedule";
-        $all_programs_stmt = $conn->prepare($all_programs_sql);
-        
-        if ($all_programs_stmt->execute()) {
-            $all_programs_result = $all_programs_stmt->get_result();
-            while ($row = $all_programs_result->fetch_assoc()) {
-                $all_existing_programs[] = [
-                    'program_name' => $row['program_name'],
-                    'category' => $row['category'],
-                    'stage' => $row['stage'],
-                    'date' => $row['date']
-                ];
-            }
-        }
-        
+        // Basic validation first
         foreach ($data as $index => $schedule) {
             // Skip completely empty rows
             if (empty(trim($schedule['program_name'] ?? '')) && 
@@ -170,13 +154,13 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
             
             // Required fields validation
             if (empty($program_name) || empty($category) || empty($date) || empty($start) || empty($end)) {
-                $conflicts[] = "Row " . ($index + 1) . ": All fields are required (Program: '{$program_name}', Category: '{$category}')";
+                $conflicts[] = "Row " . ($index + 1) . ": All fields are required";
                 continue;
             }
             
             // Date format validation
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
-                $conflicts[] = "Row " . ($index + 1) . ": Invalid date format for '{$program_name}'. Expected YYYY-MM-DD";
+                $conflicts[] = "Row " . ($index + 1) . ": Invalid date format for '{$program_name}'";
                 continue;
             }
             
@@ -192,40 +176,13 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
                 continue;
             }
             
-            // UPDATED: Check if same program+category combination exists on different stage/date
-            $existing_program_check = array_filter($all_existing_programs, function($existing) use ($program_name, $category, $stage, $date) {
-                return $existing['program_name'] === $program_name && 
-                       $existing['category'] === $category &&
-                       !($existing['stage'] == $stage && $existing['date'] === $date);
-            });
-            
-            if (!empty($existing_program_check)) {
-                $existing = array_values($existing_program_check)[0];
-                $conflicts[] = "Row " . ($index + 1) . ": Program '{$program_name}' in category '{$category}' is already scheduled on {$existing['date']} Stage {$existing['stage']}. Each program-category combination can only be scheduled once.";
-                continue;
-            }
-            
-            // UPDATED: Check for duplicate program+category on same date different stage
-            $same_date_conflicts = array_filter($all_existing_programs, function($existing) use ($program_name, $category, $stage, $date) {
-                return $existing['program_name'] === $program_name && 
-                       $existing['category'] === $category &&
-                       $existing['date'] === $date && 
-                       $existing['stage'] != $stage;
-            });
-            
-            if (!empty($same_date_conflicts)) {
-                $existing = array_values($same_date_conflicts)[0];
-                $conflicts[] = "Row " . ($index + 1) . ": Program '{$program_name}' in category '{$category}' is already scheduled on Stage {$existing['stage']} for {$date}.";
-                continue;
-            }
-            
             // Check for duplicates within current submission
             $duplicates_in_submission = array_filter($valid_items, function($item) use ($program_name, $category) {
                 return $item['program_name'] === $program_name && $item['category'] === $category;
             });
             
             if (!empty($duplicates_in_submission)) {
-                $conflicts[] = "Row " . ($index + 1) . ": Program '{$program_name}' in category '{$category}' appears multiple times in current submission.";
+                $conflicts[] = "Row " . ($index + 1) . ": Program '{$program_name}' in category '{$category}' appears multiple times in submission";
                 continue;
             }
             
@@ -261,9 +218,10 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
         $conn->begin_transaction();
         
         try {
-            // Clear existing schedule for this stage and date(s)
+            // Get dates being updated
             $dates_to_clear = array_unique(array_column($valid_items, 'date'));
             
+            // Clear existing schedule for this stage and these dates FIRST
             foreach ($dates_to_clear as $date_to_clear) {
                 $clear_sql = "DELETE FROM schedule WHERE stage = ? AND date = ?";
                 $clear_stmt = $conn->prepare($clear_sql);
@@ -280,18 +238,24 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
                 $clear_stmt->close();
             }
             
-            // Final cross-check before insert
+            // NOW check for conflicts with OTHER stages (after clearing current stage)
             $final_conflicts = [];
             foreach ($valid_items as $item) {
-                $check_sql = "SELECT stage, date FROM schedule WHERE program_name = ? AND category = ? AND NOT (stage = ? AND date = ?)";
+                // Skip conflict check for breaks
+                if ($item['category'] === 'break') {
+                    continue;
+                }
+                
+                // Check if program+category exists on OTHER stages for same date
+                $check_sql = "SELECT stage, date FROM schedule WHERE program_name = ? AND category = ? AND date = ? AND stage != ?";
                 $check_stmt = $conn->prepare($check_sql);
-                $check_stmt->bind_param("ssis", $item['program_name'], $item['category'], $stage, $item['date']);
+                $check_stmt->bind_param("sssi", $item['program_name'], $item['category'], $item['date'], $stage);
                 
                 if ($check_stmt->execute()) {
                     $check_result = $check_stmt->get_result();
                     if ($check_result->num_rows > 0) {
                         $conflict_row = $check_result->fetch_assoc();
-                        $final_conflicts[] = "Program '{$item['program_name']}' in category '{$item['category']}' is already scheduled on {$conflict_row['date']} Stage {$conflict_row['stage']}.";
+                        $final_conflicts[] = "Program '{$item['program_name']}' in category '{$item['category']}' is already scheduled on Stage {$conflict_row['stage']} for {$item['date']}";
                     }
                 }
                 $check_stmt->close();
@@ -330,6 +294,8 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
                 
                 if ($insert_stmt->execute()) {
                     $successful_inserts++;
+                } else {
+                    error_log("Failed to insert: " . $insert_stmt->error);
                 }
             }
             
