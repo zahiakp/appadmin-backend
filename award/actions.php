@@ -6,7 +6,7 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') exit(0);
 
-$con = new mysqli("localhost", "u999765516_application", "&k?XO;WgA7", "u999765516_application");
+$con = new mysqli("localhost", "u999765516_application", "D|O^QBm|N^7g", "u999765516_application");
 if ($con->connect_error) die(json_encode(["success" => false, "message" => "DB error"]));
 
 $key = 'b1daf1bbc7bbd214045af';
