@@ -57,7 +57,7 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
                 $response = ["success" => false, "message" => "Missing event ID"];
             } else {
                 $id = intval($_GET['id']);
-                $fields = ["title", "place", "time", "type"];
+                $fields = ["title", "place", "date", "time", "type", "description"];
                 $updates = [];
                 $params  = [];
                 $types   = "";
@@ -67,6 +67,17 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
                         $updates[] = "$f = ?";
                         $params[]  = $_POST[$f];
                         $types    .= "s";
+                    }
+                }
+
+                // Validate date format if provided
+                if (isset($_POST['date']) && !empty($_POST['date'])) {
+                    $dateObj = DateTime::createFromFormat('Y-m-d', $_POST['date']);
+                    if (!$dateObj || $dateObj->format('Y-m-d') !== $_POST['date']) {
+                        http_response_code(400);
+                        $response = ["success" => false, "message" => "Invalid date format. Use YYYY-MM-DD"];
+                        echo json_encode($response);
+                        exit;
                     }
                 }
 
@@ -109,7 +120,7 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
 
         } else {
            
-            $required = ['title','place','time','type'];
+            $required = ['title','place','date','time','type'];
             $missing = [];
             foreach ($required as $f) {
                 if (!isset($_POST[$f]) || trim($_POST[$f]) === "") $missing[]=$f;
@@ -118,24 +129,47 @@ if (isset($_GET['api']) && $_GET['api'] == API) {
                 http_response_code(400);
                 $response = ["success"=>false,"message"=>"Missing required fields: ".implode(", ",$missing)];
             } else {
-                $title=$_POST['title']; $place=$_POST['place']; $time=$_POST['time']; $type=$_POST['type'];
-                $imagePath=null;
+                $title = $_POST['title']; 
+                $place = $_POST['place']; 
+                $date = $_POST['date'];
+                $time = $_POST['time']; 
+                $type = $_POST['type'];
+                $description = isset($_POST['description']) ? $_POST['description'] : '';
+                $imagePath = null;
+
+                // Validate date format
+                $dateObj = DateTime::createFromFormat('Y-m-d', $date);
+                if (!$dateObj || $dateObj->format('Y-m-d') !== $date) {
+                    http_response_code(400);
+                    echo json_encode(["success" => false, "message" => "Invalid date format. Use YYYY-MM-DD"]);
+                    exit;
+                }
 
                 if (isset($_FILES['image']) && $_FILES['image']['error']===UPLOAD_ERR_OK) {
                     $allowed=['image/jpeg','image/jpg','image/png','image/gif','image/webp'];
                     $mime=mime_content_type($_FILES['image']['tmp_name']);
                     $size=$_FILES['image']['size'];
-                    if (!in_array($mime,$allowed)){ http_response_code(400); echo json_encode(["success"=>false,"message"=>"Invalid file type"]); exit;}
-                    if ($size>5*1024*1024){ http_response_code(400); echo json_encode(["success"=>false,"message"=>"Image size must be <5MB"]); exit;}
-                    $dir="../uploads/events/"; if(!is_dir($dir)) mkdir($dir,0777,true);
+                    if (!in_array($mime,$allowed)){ 
+                        http_response_code(400); 
+                        echo json_encode(["success"=>false,"message"=>"Invalid file type"]); 
+                        exit;
+                    }
+                    if ($size>5*1024*1024){ 
+                        http_response_code(400); 
+                        echo json_encode(["success"=>false,"message"=>"Image size must be <5MB"]); 
+                        exit;
+                    }
+                    $dir="../uploads/events/"; 
+                    if(!is_dir($dir)) mkdir($dir,0777,true);
                     $ext=pathinfo($_FILES['image']['name'],PATHINFO_EXTENSION);
                     $new=uniqid("event_",true).".".strtolower($ext);
-                    if(move_uploaded_file($_FILES['image']['tmp_name'],$dir.$new)) $imagePath="uploads/events/".$new;
+                    if(move_uploaded_file($_FILES['image']['tmp_name'],$dir.$new)) 
+                        $imagePath="uploads/events/".$new;
                 }
 
-                $sql="INSERT INTO events (title,time,type,place,image) VALUES (?,?,?,?,?)";
+                $sql="INSERT INTO events (title, place, date, time, type, description, image) VALUES (?,?,?,?,?,?,?)";
                 $stmt=$conn->prepare($sql);
-                $stmt->bind_param("sssss",$title,$time,$type,$place,$imagePath);
+                $stmt->bind_param("sssssss", $title, $place, $date, $time, $type, $description, $imagePath);
                 if($stmt->execute()){
                     http_response_code(201);
                     $response=["success"=>true,"message"=>"Event added successfully","id"=>$stmt->insert_id,"image"=>$imagePath];
