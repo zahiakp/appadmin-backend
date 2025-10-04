@@ -14,12 +14,12 @@ $method = $_SERVER['REQUEST_METHOD'];
 function handleOption($value)
 {
     $pointsMap = [
-        "Expert Convos" => 7,
-        "Edu Login" => 7,
-        "WriteWell Clinic" => 5,
-        "Pro Chat" => 3,
-        "Mind Wellness Cliinic" => 5,
-        "Science Orbit" => 7,
+        "Expert Convos" => 4,
+        "Edu Login" => 4,
+        "WriteWell Clinic" => 3,
+        "Pro Chat" => 2,
+        "Mind Wellness Cliinic" => 3,
+        "Science Orbit" => 4,
     ];
     return $pointsMap[$value] ?? 0;
 }
@@ -150,14 +150,16 @@ try {
         // Admin scans student Jamia ID at event
         elseif ($method == "GET" && isset($_GET['event']) && isset($_GET['student'])) {
             $event = filter_var($_GET['event'], FILTER_VALIDATE_INT);
-            $student = strtoupper(trim($_GET['student'])); // Jamia ID like 2019JMC062
+            $student = strtoupper(trim($_GET['student'])); // Jamia ID like 2019JMC062 or JMF221
 
             error_log("QR Scan Request - Event: $event, Student: $student");
 
-            // Validate Jamia ID format (4 digits + 3 letters + 3-4 digits)
-            if (!preg_match('/^\d{4}[A-Z]{2,3}\d{3,4}$/', $student)) {
+            // Updated validation: supports both formats
+            // Format 1: 4 digits + 2-3 letters + 3-4 digits (e.g., 2019JMC062)
+            // Format 2: 3 letters + 3 digits (e.g., JMF221)
+            if (!preg_match('/^(\d{4}[A-Z]{2,3}\d{3,4}|[A-Z]{2,3}\d{3})$/', $student)) {
                 http_response_code(400);
-                $response = ["success" => false, "message" => "Invalid Jamia ID format. Expected format: 2019ABC123"];
+                $response = ["success" => false, "message" => "Invalid Jamia ID format. Expected formats: 2019ABC123 or JMF221"];
             } elseif ($event === false || $event <= 0) {
                 http_response_code(400);
                 $response = ["success" => false, "message" => "Invalid event ID"];
